@@ -52,6 +52,11 @@ const RESP_DATA_TYPE = Object.freeze({
   }),
 });
 
+const EXPIRY_OPTION = Object.freeze({
+  EX: Object.freeze({ option: "EX", millisecondsMultiplier: 1000 }),
+  PX: Object.freeze({ option: "PX", millisecondsMultiplier: 1 }),
+});
+
 /**
  * @typedef {Object} RedisRequest
  * @property {string} command
@@ -200,11 +205,38 @@ function setHandler(request, connection) {
     return wrongNumberOfArgumentsHandler(request, connection);
   }
 
-  const [key, value] = arguments;
-  store.set(key, value);
+  const [key, value, ...options] = arguments;
+  const expiry = getExpiry(options);
+  store.set(key, { value, expiry });
 
   const ok = "OK";
   connection.write(parseStringToRespSimpleString(ok));
+}
+
+/**
+ * @param {string[]} options
+ * @returns {number|null}
+ */
+function getExpiry(options) {
+  const expiryOption = options.find((option, index) =>
+    Object.values(EXPIRY_OPTION)
+      .map(({ option }) => option)
+      .includes(option.toLocaleUpperCase())
+  );
+
+  if (!expiryOption) return null;
+
+  const expiryOptionIndex = options.indexOf(expiryOption);
+  const expiryOptionValue = Number.parseInt(options[expiryOptionIndex + 1]);
+
+  const isValidValue = !isNaN(expiryOptionValue) && expiryOptionValue > 0;
+  if (!isValidValue) return null;
+
+  const option = expiryOption.toLocaleUpperCase();
+  const { millisecondsMultiplier } = EXPIRY_OPTION[option];
+  const now = new Date().getTime();
+
+  return now + expiryOptionValue * millisecondsMultiplier;
 }
 
 /**
@@ -219,11 +251,32 @@ function getHandler(request, connection) {
   }
 
   const [key] = arguments;
-  const value = store.get(key);
+  const value = getValue(key);
 
   if (!value) return connection.write(NIL);
 
   connection.write(parseStringToRespBulkString(value));
+}
+
+/**
+ * @param {string} key
+ * @returns {?string}
+ */
+function getValue(key) {
+  const result = store.get(key);
+  if (!result) return;
+  const { value, expiry } = result;
+
+  if (expiry) {
+    const now = new Date().getTime();
+    const isExpired = now > expiry;
+    if (isExpired) {
+      store.delete(key);
+      return;
+    }
+  }
+
+  return value;
 }
 
 /**
