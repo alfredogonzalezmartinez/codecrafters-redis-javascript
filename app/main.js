@@ -18,7 +18,11 @@ const server = net.createServer((connection) => {
 
 server.listen(6379, "127.0.0.1");
 
+const store = new Map();
+
 const PROTOCOLS_TERMINATOR = "\r\n";
+
+const NIL = "$-1\r\n";
 
 const CATEGORY = Object.freeze({
   SIMPLE: "Simple",
@@ -136,10 +140,21 @@ function parseStringToRespSimpleError(string) {
   return `${firstByte}${string}${PROTOCOLS_TERMINATOR}`;
 }
 
+/**
+ * @param {string} respSimpleString
+ * @returns {string}
+ */
+function parseStringToRespBulkString(string) {
+  const firstByte = RESP_DATA_TYPE.BULK_STRING.FIST_BYTE;
+  const bytesLength = Buffer.byteLength(string);
+  return `${firstByte}${bytesLength}${PROTOCOLS_TERMINATOR}${string}${PROTOCOLS_TERMINATOR}`;
+}
+
 const COMMAND_HANDLER = Object.freeze({
   PING: pingHandler,
   ECHO: echoHandler,
-  UNKNOWN: unknownHandler,
+  SET: setHandler,
+  GET: getHandler,
 });
 
 /**
@@ -149,7 +164,7 @@ const COMMAND_HANDLER = Object.freeze({
 function handleRequest(request, connection) {
   const { command } = request;
   const handler = COMMAND_HANDLER[command];
-  if (!handler) return COMMAND_HANDLER.UNKNOWN(request, connection);
+  if (!handler) return unknownCommandHandler(request, connection);
   handler(request, connection);
 }
 
@@ -178,8 +193,55 @@ function echoHandler(request, connection) {
  * @param {RedisRequest} request
  * @param {net.Socket} connection
  */
-function unknownHandler(request, connection) {
+function setHandler(request, connection) {
+  const { arguments } = request;
+
+  if (arguments.length < 2) {
+    return wrongNumberOfArgumentsHandler(request, connection);
+  }
+
+  const [key, value] = arguments;
+  store.set(key, value);
+
+  const ok = "OK";
+  connection.write(parseStringToRespSimpleString(ok));
+}
+
+/**
+ * @param {RedisRequest} request
+ * @param {net.Socket} connection
+ */
+function getHandler(request, connection) {
+  const { arguments = [] } = request;
+
+  if (arguments.length < 1) {
+    return wrongNumberOfArgumentsHandler(request, connection);
+  }
+
+  const [key] = arguments;
+  const value = store.get(key);
+
+  if (!value) return connection.write(NIL);
+
+  connection.write(parseStringToRespBulkString(value));
+}
+
+/**
+ * @param {RedisRequest} request
+ * @param {net.Socket} connection
+ */
+function unknownCommandHandler(request, connection) {
   const { command } = request;
   const error = `ERROR unknown command '${command}'`;
+  connection.write(parseStringToRespSimpleError(error));
+}
+
+/**
+ * @param {RedisRequest} request
+ * @param {net.Socket} connection
+ */
+function wrongNumberOfArgumentsHandler(request, connection) {
+  const { command } = request;
+  const error = `ERROR wrong number of arguments for '${command}' command`;
   connection.write(parseStringToRespSimpleError(error));
 }
