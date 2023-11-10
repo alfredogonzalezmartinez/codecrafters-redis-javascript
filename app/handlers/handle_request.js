@@ -1,3 +1,4 @@
+const configHandler = require("./commands/config_handler");
 const echoHandler = require("./commands/echo_handler");
 const getHandler = require("./commands/get_handler");
 const pingHandler = require("./commands/ping_handler");
@@ -9,6 +10,7 @@ const COMMAND_HANDLER = Object.freeze({
   ECHO: echoHandler,
   SET: setHandler,
   GET: getHandler,
+  CONFIG: configHandler,
 });
 
 /**
